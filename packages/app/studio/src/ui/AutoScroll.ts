@@ -63,6 +63,8 @@ export const installAutoScroll = (target: Element, autoScroller: AutoScroller, o
             Events.subscribe(owner, "dragover", dragOverListener, {capture: true}),
             Events.subscribe(owner, "pointermove", moveListener, {capture: true}),
             Events.subscribe(owner, "pointerup", upListener),
+            Events.subscribe(owner, "pointercancel", upListener),
+            Events.subscribe(owner, "keydown", (event: KeyboardEvent) => {if (event.key === "Escape") {upListener()}}),
             Events.subscribe(owner, "dragend", upListener),
             Events.subscribe(owner, "drop", upListener, {capture: true})
         )
@@ -71,6 +73,7 @@ export const installAutoScroll = (target: Element, autoScroller: AutoScroller, o
     return Terminable.many(
         Events.subscribe(target, "pointerdown", () => arm("pointer"), {capture: true}),
         Events.subscribe(target, "dragenter", () => {if (lifeTime.isEmpty()) {arm("drag")}}, {capture: true}),
-        lifeTime
+        lifeTime,
+        {terminate: stop}
     )
 }

@@ -48,17 +48,17 @@ export const ModulatorsLane = ({lifecycle, service, collapsed}: Construct) => {
     const clipCellsLifecycle = lifecycle.own(new Terminator())
     lifecycle.ownAll(
         // The clip column mirrors the ClipLane's placeholder cells, exactly like a unit's synthetic lane.
-        service.timeline.clips.visible.catchupAndSubscribe(visibleOwner => {
+        service.timeline.clips.enabled.catchupAndSubscribe(enabledOwner => {
             clipCellsLifecycle.terminate()
             Html.empty(clipArea)
-            if (visibleOwner.getValue()) {
-                clipCellsLifecycle.own(service.timeline.clips.count.catchupAndSubscribe(countOwner => {
+            if (enabledOwner.getValue()) {
+                clipCellsLifecycle.own(service.timeline.clips.visible.catchupAndSubscribe(visibleOwner => {
                     Html.empty(clipArea)
                     Arrays.create(index => (
                         <div style={{gridColumn: `${index + 1} / ${index + 2}`}}>
                             <div className="placeholder"/>
                         </div>
-                    ), countOwner.getValue()).forEach(cell => clipArea.appendChild(cell))
+                    ), visibleOwner.getValue()).forEach(cell => clipArea.appendChild(cell))
                 }))
             }
         }),

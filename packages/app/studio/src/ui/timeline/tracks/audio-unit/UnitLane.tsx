@@ -123,17 +123,17 @@ export const UnitLane = ({lifecycle, service, audioUnitBoxAdapter}: Construct) =
         audioUnitBoxAdapter.input.catchupAndSubscribeLabelChange(option =>
             nameLabel.textContent = option.unwrapOrElse("")),
         // The clip column mirrors the ClipLane's placeholder cells (no clips can exist on this lane).
-        service.timeline.clips.visible.catchupAndSubscribe(visibleOwner => {
+        service.timeline.clips.enabled.catchupAndSubscribe(enabledOwner => {
             clipCellsLifecycle.terminate()
             Html.empty(clipArea)
-            if (visibleOwner.getValue()) {
-                clipCellsLifecycle.own(service.timeline.clips.count.catchupAndSubscribe(countOwner => {
+            if (enabledOwner.getValue()) {
+                clipCellsLifecycle.own(service.timeline.clips.visible.catchupAndSubscribe(visibleOwner => {
                     Html.empty(clipArea)
                     Arrays.create(index => (
                         <div style={{gridColumn: `${index + 1} / ${index + 2}`}}>
                             <div className="placeholder"/>
                         </div>
-                    ), countOwner.getValue()).forEach(cell => clipArea.appendChild(cell))
+                    ), visibleOwner.getValue()).forEach(cell => clipArea.appendChild(cell))
                 }))
             }
         }),

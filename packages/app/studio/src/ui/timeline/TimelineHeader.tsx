@@ -63,7 +63,7 @@ export const TimelineHeader = ({lifecycle, service}: Construct) => {
                 <Icon symbol={IconSymbol.Primary}/>
             </MenuButton>
             <Checkbox lifecycle={lifecycle}
-                      model={clips.visible}
+                      model={clips.enabled}
                       appearance={{
                           activeColor: Colors.yellow,
                           tooltip: ShortcutTooltip.create("Clips", GlobalShortcuts["toggle-clips"].shortcut)

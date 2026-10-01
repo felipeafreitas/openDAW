@@ -26,11 +26,14 @@ Three numbers replace the one:
 | name       | meaning                                   | invariant                                  |
 |------------|-------------------------------------------|--------------------------------------------|
 | `columns`  | scene count (model)                       | `>= 16`, `> highest occupied index`        |
-| `visible`  | cells shown (resizer)                     | `1 <= visible <= min(columns, fit)`        |
+| `visible`  | cells shown (resizer)                     | `1 <= visible <= min(columns, max(1, fit))`|
 | `scroll`   | model index shown in the first cell       | `0 <= scroll <= columns - visible`         |
 
-`fit` = columns that leave the region view at least `MinRegionsWidth` (say 320px):
-`floor((timelineWidth - headerWidth - MinRegionsWidth) / ClipWidth)`.
+`fit` = columns that leave the region view at least `MinRegionsWidth` (320px):
+`floor((timelineWidth - headerWidth - MinRegionsWidth - 1) / ClipWidth)`, including the leading grid gap.
+
+Keep at least one visible column when the window is too narrow to preserve 320px for regions. Clamp the
+visible width when the timeline shrinks; widening it again does not restore the previous width.
 
 Cell `i` shows column `scroll + i`. Every place that maps between pixels and column index adds or subtracts
 `scroll`. Everything that spans the grid uses `visible`.
@@ -38,6 +41,7 @@ Cell `i` shows column `scroll + i`. Every place that maps between pixels and col
 `columns` grows only on commit, never during a drag: when a move is approved, a clip is dropped, or a clip is
 created in column `columns - 1`, columns becomes `index + 2` so there is always one free column after the last
 clip. During a drag the delta is clamped to `columns - 1 - index` and the view auto scrolls at the edges.
+Growth stays outside undo history. Undo restores clips but leaves the extra empty columns available.
 
 ## Model
 
@@ -67,32 +71,37 @@ Boot (StudioService): replace the `getMinFreeIndex` reduce with the highest `ind
 - `Timeline.tsx` sets `--clips-visible` from `visible` (rename of `--clips-count`, all 10 sass consumers).
 - `ClipLane`: cells count = `visible`. `populatePlaceholder` maps `cell = index - scroll`, skips outside
   `0..cells.length`. Rebuild on `scroll` change too. `gridColumn` stays cell based.
-- `ClipsHeader`: labels show `scroll + index + 1`. Play and stop schedule column `scroll + index`. Rebuild
-  labels on `scroll` change.
+- `ClipsHeader`: labels show `scroll + index + 1`. Play schedules column `scroll + index`; stop retains its
+  existing track-wide behavior. Rebuild labels on `scroll` change.
 - `UnitLane` and `ModulatorsLane` placeholder cells: `visible` instead of `count`, no index semantics.
 - `ClipsArea` xAxis: `valueToAxis(index) = (index - scroll) * ClipWidth + left`,
   `axisToValue(x) = floor((x - left) / ClipWidth) + scroll`. Drop preview x uses `index - scroll`.
 - `ClipCapturing`: `clipIndex = floor(x / ClipWidth) + scroll`.
-- `ClipSelectableLocator.selectablesBetween`: both `floor(u / ClipWidth)` get `+ scroll`.
-- `ClipDragAndDrop`: `floor(x / ClipWidth) + scroll`.
+- Rectangle selection stores its start in model pixels (`localX + scroll * ClipWidth`).
+  `ClipSelectableLocator.selectablesBetween` divides these model coordinates by `ClipWidth`; point capture
+  subtracts the current scroll offset. The selection anchor stays fixed during edge scrolling.
+- `ClipDragAndDrop`: capture `floor(x / ClipWidth) + scroll` before asynchronous sample loading begins.
 - `ClipMoveModifier.update`: clamp each clip to `[0, columns - 1]`. `approve`: after the edit,
   `ensureColumn(highest new index)`. `cancel` unchanged. Same in the double click create path (`ClipsArea`)
   and the external drop path.
+- Region-to-clip conversion grows the range and reveals the resulting clip.
+- Cancel queued lane and header rebuilds when hiding the launcher, and terminate them with their lifecycle.
 
 ## Input
 
 - Resizer (`ClipsHeader`): compute `fit` once at drag begin from the timeline element and header width, then
   `setVisible(begin + steps, fit)`. Dragging to zero still sets `enabled` false as today.
 - Wheel over `ClipsArea`: `shiftKey ? deltaY : deltaX`, accumulate, step one column per `ClipWidth` px.
-  The vertical wheel handler in `AudioUnitsTimeline` keeps working for `deltaY` without shift.
+  Normalize line and page wheel units. The vertical wheel handler in `AudioUnitsTimeline` keeps working for
+  vertical-only wheel input without shift.
 - Horizontal scrollbar: `Scroller` with `Orientation.horizontal` from `@opendaw/studio-scrollbars`, placed in the
   `TracksFooter` row spanning the clip columns. Its `ScrollModel` is fed in pixel units
   (`contentSize = columns * ClipWidth`, `visibleSize = visible * ClipWidth`, `position = scroll * ClipWidth`)
   and writes back `round(position / ClipWidth)`. Hidden when `columns <= visible`.
 - Auto scroll: `installAutoScroll(clipsArea, (deltaX) => ...)` already reports `deltaX`, which
   `AudioUnitsTimeline` ignores today. Step one column per ~150 ms while the pointer is outside, direction from
-  the sign. Covers clip moves and external drops. The modifier reads the current `scroll` in `update`, so the
-  preview follows the scroll without extra wiring.
+  the sign. Covers clip moves, rectangle selection and external drops. The modifier reads the current `scroll`
+  in `update`, so the preview follows the scroll without extra wiring. Canceling or ending the drag stops scrolling.
 
 ## Phases (browser checkpoint after each, all dists rebuilt)
 
@@ -108,17 +117,26 @@ Boot (StudioService): replace the `getMinFreeIndex` reduce with the highest `ind
 
 - `ClipsView.test.ts`: every clamp and invariant, boot reset with 0, 3, 15, 40 occupied columns, `reveal`
   from both sides, `setVisible` shrinking past the current scroll.
-- Manual checklist per phase in the browser: move a clip from column 0 to 20 with auto scroll, undo, resize to
-  one column and back, wheel and scrollbar agree, region view never narrower than `MinRegionsWidth`.
+- Manual checklist: move a clip from index 0 to 20 in a project with at least 21 columns; in a fresh project,
+  drop into the last column and confirm another becomes available. Undo restores clips and preserves growth.
+- Resize to one column, hide completely, reopen, and confirm no clip or header cells survive hiding.
+- Shrink the browser and confirm the region view retains 320px when one clip column and the header also fit.
+  Widening the browser keeps the reduced clip-pane width. Wheel and scrollbar agree.
+- Select across columns while edge scrolling; the selection keeps its original starting column. Cancel a
+  drag with Escape and confirm scrolling stops. Change the view while an import loads and confirm the clip
+  lands at the original drop column. Replacing an occupied clip remains undoable.
 
 ## Out of scope
 
 - Pixel smooth scrolling. Column snapping matches a launcher grid and keeps the subgrid layout.
-- Persisting `visible` and `scroll` per project. Boot resets them.
+- Persisting `visible` and `scroll` per project. Boot resets scroll and recalculates columns; visible width
+  remains UI state.
 - Merging the duplicated placeholder cell code in `UnitLane` and `ModulatorsLane` into `ClipLane`.
+- Changing the existing replacement behavior when moving a clip into an occupied cell.
 
-## Open decisions
+## Agreed decisions
 
 - Minimum `columns`: 16.
-- `MinRegionsWidth`: 320px, or derive from the header width.
-- Whether the scrollbar sits in the footer row or as a floating overlay like the vertical one.
+- `MinRegionsWidth`: 320px, with one visible clip column on narrower windows.
+- Scrollbar in the footer row.
+- One complete scrolling PR; implementation phases are development checkpoints.

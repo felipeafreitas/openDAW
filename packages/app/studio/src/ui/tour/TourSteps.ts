@@ -62,7 +62,7 @@ export const TourSteps: Record<TourAnchor, TourStep> = {
         text: "Launch loops per track without arranging them. Great for sketching ideas live.",
         prepare: service => {
             service.layout.browseScope.setValue(BrowseScope.Presets)
-            service.timeline.clips.visible.setValue(true)
+            service.timeline.clips.enabled.setValue(true)
         }
     },
     regions: {

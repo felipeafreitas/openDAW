@@ -69,7 +69,7 @@ export namespace StudioShortcutManager {
             engine: {preferences: {settings: {metronome}}, isPlaying, isRecording, isCountingIn, position},
             panelLayout,
             timeline: {
-                clips: {visible: clipsVisibility},
+                clips: {enabled: clipsVisibility},
                 followCursor,
                 primaryVisibility: {markers, tempo, signature},
                 snapping

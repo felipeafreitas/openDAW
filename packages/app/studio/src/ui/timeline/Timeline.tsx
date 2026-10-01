@@ -10,6 +10,7 @@ import {AudioUnitsTimeline} from "./tracks/audio-unit/AudioUnitsTimeline.tsx"
 import {ClipsHeader} from "@/ui/timeline/tracks/audio-unit/clips/ClipsHeader.tsx"
 import {ppqn} from "@opendaw/lib-dsp"
 import {deferNextFrame, Html} from "@opendaw/lib-dom"
+import {ClipWidth, MinRegionsWidth} from "@/ui/timeline/tracks/audio-unit/clips/constants"
 
 const className = Html.adoptStyleSheet(css, "Timeline")
 
@@ -42,6 +43,8 @@ export const Timeline = ({lifecycle, service}: Construct) => {
         element.classList.toggle("primary-tracks-visible", markers.getValue() || tempo.getValue() || signature.getValue())))
     lifecycle.ownAll(
         Html.watchResize(element, () => {
+            const fit = Math.floor((element.clientWidth - timelineHeader.clientWidth - MinRegionsWidth - 1) / ClipWidth)
+            clips.setVisible(clips.visible.getValue(), fit)
             const cursorHeight = element.clientHeight
                 - timelineHeader.clientHeight
                 - tracksFooter.clientHeight
@@ -72,8 +75,8 @@ export const Timeline = ({lifecycle, service}: Construct) => {
                 lastPosition = position
             }
         })()),
-        clips.visible.catchupAndSubscribe(owner => { return element.classList.toggle("clips-visible", owner.getValue()) }),
-        clips.count.catchupAndSubscribe(owner => element.style.setProperty("--clips-count", String(owner.getValue()))),
+        clips.enabled.catchupAndSubscribe(owner => { return element.classList.toggle("clips-visible", owner.getValue()) }),
+        clips.visible.catchupAndSubscribe(owner => element.style.setProperty("--clips-visible", String(owner.getValue()))),
         markers.catchupAndSubscribe(request),
         tempo.catchupAndSubscribe(request),
         signature.catchupAndSubscribe(request)

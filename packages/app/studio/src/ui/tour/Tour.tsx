@@ -79,10 +79,10 @@ export namespace Tour {
             this.#stepLifecycle = this.#terminator.own(new Terminator())
             this.#restore = new Terminator()
             const browseScope = service.layout.browseScope.getValue()
-            const clipsVisible = service.timeline.clips.visible.getValue()
+            const clipsVisible = service.timeline.clips.enabled.getValue()
             this.#restore.ownAll(
                 {terminate: () => service.layout.browseScope.setValue(browseScope)},
-                {terminate: () => service.timeline.clips.visible.setValue(clipsVisible)}
+                {terminate: () => service.timeline.clips.enabled.setValue(clipsVisible)}
             )
             this.#terminator.ownAll(
                 this.#subscribeKeys(window),

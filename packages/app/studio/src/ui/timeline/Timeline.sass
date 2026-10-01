@@ -10,16 +10,16 @@ component
   grid-template-rows: auto 1fr 14px
   gap: 1px
   overflow: hidden
-  --clips-count: 1
+  --clips-visible: 1
   --clips-width: 48px
   --cursor-height: 1px
 
   &.clips-visible
-    grid-template-columns: var(--timeline-header-width) repeat(var(--clips-count), var(--clips-width)) 1fr
+    grid-template-columns: var(--timeline-header-width) repeat(var(--clips-visible), var(--clips-width)) 1fr
 
   &:not(.clips-visible)
     column-gap: 0
-    --clips-count: 0 !important
+    --clips-visible: 0 !important
 
   &.primary-tracks-visible
     grid-template-rows: auto auto 1fr 14px

@@ -22,7 +22,7 @@ import {TimelineSelectableLocator} from "@/ui/timeline/TimelineSelectableLocator
 import {createClipSelectableLocator} from "@/ui/timeline/tracks/audio-unit/clips/ClipSelectableLocator.ts"
 import {SelectionRectangle} from "@/ui/timeline/SelectionRectangle.tsx"
 import {ClipMoveModifier} from "@/ui/timeline/tracks/audio-unit/clips/ClipMoveModifier.ts"
-import {ClipWidth} from "@/ui/timeline/tracks/audio-unit/clips/constants.ts"
+import {AutoScrollColumnInterval, ClipWidth} from "@/ui/timeline/tracks/audio-unit/clips/constants.ts"
 import {installAutoScroll} from "@/ui/AutoScroll.ts"
 import {Config} from "@/ui/timeline/Config"
 import {ScrollModel} from "@/ui/components/ScrollModel.ts"
@@ -46,7 +46,7 @@ type Construct = {
 }
 
 export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollContainer}: Construct) => {
-    const {project} = service
+    const {project, timeline: {clips}} = service
     const {selection, boxAdapters, editing, userEditingManager} = project
     const dropPreview: HTMLElement = (<div className="drop-target" tabIndex={-1}/>)
     const element: HTMLElement = (<div className={className} tabIndex={-1}>{dropPreview}</div>)
@@ -57,8 +57,9 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
             fy: vertex => ClipAdapters.for(boxAdapters, vertex.box)
         }))
 
-    const capturing: ElementCapturing<ClipCaptureTarget> = ClipCapturing.create(element, manager)
-    const locator: TimelineSelectableLocator<AnyClipBoxAdapter> = createClipSelectableLocator(capturing, manager)
+    const capturing: ElementCapturing<ClipCaptureTarget> = ClipCapturing.create(element, manager, clips.scroll)
+    const locator: TimelineSelectableLocator<AnyClipBoxAdapter> =
+        createClipSelectableLocator(capturing, manager, clips.scroll)
     const dragAndDrop = new ClipDragAndDrop(service, capturing)
     element.appendChild(
         <SelectionRectangle
@@ -67,8 +68,9 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
             selection={clipSelection}
             target={element}
             xAxis={{
-                axisToValue: (axis: number): number => clamp(axis, 0, element.clientWidth),
-                valueToAxis: (value: number): number => value
+                axisToValue: (axis: number): number =>
+                    clamp(axis, 0, element.clientWidth) + clips.scroll.getValue() * ClipWidth,
+                valueToAxis: (value: number): number => value - clips.scroll.getValue() * ClipWidth
             }}
             yAxis={{
                 axisToValue: (axis: number): number => clamp(axis + scrollContainer.scrollTop,
@@ -77,14 +79,18 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
             }}/>
     )
     const xAxis: ValueAxis = {
-        valueToAxis: (index: int): number => index * ClipWidth + element.getBoundingClientRect().left,
-        axisToValue: (axis: number): int => Math.floor(Math.max(0, axis - element.getBoundingClientRect().left) / ClipWidth)
+        valueToAxis: (index: int): number =>
+            (index - clips.scroll.getValue()) * ClipWidth + element.getBoundingClientRect().left,
+        axisToValue: (axis: number): int => clamp(Math.floor((axis - element.getBoundingClientRect().left) / ClipWidth),
+            0, clips.visible.getValue() - 1) + clips.scroll.getValue()
     }
     const yAxis: ValueAxis = {
         valueToAxis: (index: int): number => manager.indexToGlobal(index),
         axisToValue: (axis: number): int => manager.globalToIndex(axis)
     }
     const {style} = dropPreview
+    let lastColumnStep = 0.0
+    let wheelAccumulator = 0.0
     lifecycle.ownAll(
         DragAndDrop.installTarget(element, {
             drag: (event: DragEvent, data: AnyDragData): boolean => {
@@ -105,10 +111,10 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
                     const trackBoxAdapter = target.track.trackBoxAdapter
                     if (target.type === "track") {
                         const clipIndex = target.clipIndex
-                        x = clipIndex * ClipWidth
+                        x = (clipIndex - clips.scroll.getValue()) * ClipWidth
                     } else if (target.type === "clip") {
                         const clipIndex = target.clip.indexField.getValue()
-                        x = clipIndex * ClipWidth
+                        x = (clipIndex - clips.scroll.getValue()) * ClipWidth
                     } else {
                         return Unhandled(target)
                     }
@@ -130,8 +136,27 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
             enter: (_allowDrop: boolean) => {},
             leave: () => style.display = "none"
         }),
-        installAutoScroll(element, (_deltaX, deltaY) => {if (deltaY !== 0) {scrollModel.moveBy(deltaY)}},
-            {dragPadding: Config.AutoScrollDragPaddingVertical}),
+        installAutoScroll(element, (deltaX, deltaY) => {
+            if (deltaY !== 0) {scrollModel.moveBy(deltaY)}
+            const now = performance.now()
+            if (deltaX !== 0 && now - lastColumnStep >= AutoScrollColumnInterval) {
+                lastColumnStep = now
+                clips.scrollBy(Math.sign(deltaX))
+            }
+        }, {dragPadding: Config.AutoScrollDragPaddingVertical}),
+        Events.subscribe(element, "wheel", (event: WheelEvent) => {
+            const delta = event.shiftKey ? event.deltaY : event.deltaX
+            if (delta === 0) {return}
+            event.preventDefault()
+            event.stopPropagation()
+            const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? ClipWidth
+                : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? element.clientWidth : 1
+            wheelAccumulator += delta * unit
+            const steps = Math.trunc(wheelAccumulator / ClipWidth)
+            if (steps === 0) {return}
+            wheelAccumulator -= steps * ClipWidth
+            clips.scrollBy(steps)
+        }, {passive: false}),
         clipSelection.catchupAndSubscribe({
             onSelected: (selectable: AnyClipBoxAdapter) => selectable.onSelected(),
             onDeselected: (selectable: AnyClipBoxAdapter) => selectable.onDeselected()
@@ -166,21 +191,22 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
                 editing.modify(() => userEditingManager.timeline.edit(target.clip.box))
                 service.panelLayout.showIfAvailable(PanelType.ContentEditor)
             } else if (target.type === "track") {
-                editing.modify(() => {
-                    const trackBoxAdapter = target.track.trackBoxAdapter
-                    const clipIndex = target.clipIndex
-                    switch (trackBoxAdapter.type) {
-                        case TrackType.Audio:
-                            RuntimeNotifier.notify({message: "Drag a sample to create an audio clip.", icon: "Info"})
-                            return
-                        case TrackType.Notes:
-                            return project.api.createNoteClip(trackBoxAdapter.box, clipIndex)
-                        case TrackType.Value:
-                            return project.api.createValueClip(trackBoxAdapter.box, clipIndex)
-                        default:
-                            return
-                    }
-                })
+                const trackBoxAdapter = target.track.trackBoxAdapter
+                const clipIndex = target.clipIndex
+                switch (trackBoxAdapter.type) {
+                    case TrackType.Audio:
+                        RuntimeNotifier.notify({message: "Drag a sample to create an audio clip.", icon: "Info"})
+                        return
+                    case TrackType.Notes:
+                        editing.modify(() => project.api.createNoteClip(trackBoxAdapter.box, clipIndex))
+                        break
+                    case TrackType.Value:
+                        editing.modify(() => project.api.createValueClip(trackBoxAdapter.box, clipIndex))
+                        break
+                    default:
+                        return
+                }
+                clips.ensureColumn(clipIndex)
             }
         }),
         Events.subscribe(element, "keydown", (event: KeyboardEvent) => {
@@ -201,13 +227,14 @@ export const ClipsArea = ({lifecycle, service, manager, scrollModel, scrollConta
             return manager.startClipModifier(ClipMoveModifier.start({
                 project,
                 manager,
+                clips,
                 selection: clipSelection,
                 xAxis,
                 yAxis,
                 pointerClipIndex: xAxis.axisToValue(event.clientX),
                 pointerTrackIndex: yAxis.axisToValue(event.clientY)
             }))
-        })
+        }, {permanentUpdates: true})
     )
     return element
 }
